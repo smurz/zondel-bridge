@@ -17,7 +17,7 @@
  *   - status() / setPipeTimeoutMicros() are called from the UI / control
  *     thread. Lock-free reads of atomically-updated state.
  *
- * License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
+ * License: MIT. Copyright (c) 2026 Zondel.
  */
 #pragma once
 

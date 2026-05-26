@@ -1,4 +1,4 @@
-/* License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
+/* License: MIT. Copyright (c) 2026 Zondel.
  *
  * Full adaptation pipeline: channel-gate → downmix → SRC → ring-buffer →
  * 480-block pipe round-trip → ring-buffer → SRC back → upmix.

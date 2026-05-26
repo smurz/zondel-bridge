@@ -7,7 +7,7 @@
  * API (VST3 SDK >= 3.7.9) to push engine connection state from the
  * audio thread to the controller without per-block IMessage overhead.
  *
- * License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
+ * License: MIT. Copyright (c) 2026 Zondel.
  */
 #pragma once
 

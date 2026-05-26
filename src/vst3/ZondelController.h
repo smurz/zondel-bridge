@@ -6,7 +6,7 @@
  * list parameter. No custom UI (option 3b from the plan); host renders
  * the parameter list itself.
  *
- * License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
+ * License: MIT. Copyright (c) 2026 Zondel.
  */
 #pragma once
 

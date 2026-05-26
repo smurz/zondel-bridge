@@ -1,4 +1,4 @@
-/* License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
+/* License: MIT. Copyright (c) 2026 Zondel.
  *
  * 4-point Catmull-Rom cubic interpolation resampler.
  *

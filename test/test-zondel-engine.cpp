@@ -1,4 +1,4 @@
-/* License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
+/* License: MIT. Copyright (c) 2026 Zondel.
  *
  * Correctness test for zondel::Engine: covers bypass, pass-through when
  * Zondel is unreachable, and the echo round-trip via fake-pipe-server.

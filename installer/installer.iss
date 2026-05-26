@@ -1,4 +1,4 @@
-; License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
+; License: MIT. Copyright (c) 2026 Zondel.
 ; Built with Inno Setup 6.
 
 #ifndef AppVersion

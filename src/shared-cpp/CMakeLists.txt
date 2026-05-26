@@ -1,4 +1,4 @@
-# License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
+# License: MIT. Copyright (c) 2026 Zondel.
 #
 # zondel-shared-cpp — single source-of-truth C++ wrapper around
 # zondel-core. Linked by every C++ plugin target (VST3, CLAP).

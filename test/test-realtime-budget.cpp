@@ -1,4 +1,4 @@
-/* License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
+/* License: MIT. Copyright (c) 2026 Zondel.
  *
  * Realtime-budget regression test for zondel::Engine. Drives the engine
  * against fake-pipe-server (echo mode) for many blocks at a mix of

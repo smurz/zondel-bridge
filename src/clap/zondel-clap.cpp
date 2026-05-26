@@ -12,7 +12,7 @@
  *   - latency     : reports engine.getLatencySamples()
  *   - render      : hard-realtime requirement (Zondel app is realtime)
  *
- * License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
+ * License: MIT. Copyright (c) 2026 Zondel.
  */
 #include "ZondelEngine.h"
 

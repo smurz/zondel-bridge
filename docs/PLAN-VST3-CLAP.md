@@ -80,9 +80,9 @@ These are not negotiable and shape every decision below.
 3. **The pipe wire protocol is frozen at v1** (see [PROTOCOL.md](PROTOCOL.md)).
 4. **Tests target `zondel-core`, not the wrappers.** Existing tests in
    `test/` already do this.
-5. **License is GPLv2+ repo-wide.** Matches OBS Studio. The VST3 SDK is
+5. **License is MIT repo-wide.** Matches OBS Studio. The VST3 SDK is
    **MIT-licensed since 2025** (see "License rationale" below) so it
-   does not constrain our choice; we keep GPLv2+ for cross-plugin
+   does not constrain our choice; we keep MIT for cross-plugin
    consistency. CLAP is MIT — same story, no constraint.
 
 ## License rationale
@@ -92,12 +92,12 @@ The VST3 SDK at <https://github.com/steinbergmedia/vst3sdk> is
 2025, Steinberg Media Technologies GmbH). It is no longer dual-licensed
 under GPLv3 / proprietary as in previous years. This means:
 
-- Our VST3 plugin can be any license. We pick **GPLv2+** to match the
+- Our VST3 plugin can be any license. We pick **MIT** to match the
   existing OBS plugin and avoid mixed-license confusion across the
   repo.
 - CLAP headers are MIT (already permissive). Same story.
-- The OBS Studio plugin is GPLv2+ (forced by libobs's GPLv2+). The
-  repo-wide GPLv2+ choice is driven by OBS, not by VST3/CLAP.
+- The OBS Studio plugin is MIT (forced by libobs's MIT). The
+  repo-wide MIT choice is driven by OBS, not by VST3/CLAP.
 
 Pin VST3 SDK to **`v3.8.0_build_66`** (Oct 20, 2025) — the first
 release that ships with MIT licensing throughout.

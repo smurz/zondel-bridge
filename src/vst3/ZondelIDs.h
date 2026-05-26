@@ -7,7 +7,7 @@
  *
  * Generated: 2026-05-26. DO NOT REGENERATE.
  *
- * License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
+ * License: MIT. Copyright (c) 2026 Zondel.
  */
 #pragma once
 

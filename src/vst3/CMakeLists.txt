@@ -1,4 +1,4 @@
-# License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
+# License: MIT. Copyright (c) 2026 Zondel.
 #
 # Zondel.vst3 target. Built when -DBUILD_VST3=ON is set on the parent
 # CMake invocation. Pulls the Steinberg VST3 SDK via FetchContent.
