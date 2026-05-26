@@ -1,7 +1,7 @@
 /* License: GPL-2.0-or-later. Copyright (c) 2026 Zondel. */
 #include <stdio.h>
 #include <string.h>
-#include "../src/ring-buffer.h"
+#include "ring-buffer.h"
 
 static int failures = 0;
 #define EXPECT(cond, msg) do { \

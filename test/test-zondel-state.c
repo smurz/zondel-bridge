@@ -1,8 +1,8 @@
 /* License: GPL-2.0-or-later. Copyright (c) 2026 Zondel. */
 #include <stdio.h>
 #include <string.h>
-#include "../src/zondel-state.h"
-#include "../src/pipe-client.h"
+#include "zondel-state.h"
+#include "pipe-client.h"
 
 static int failures = 0;
 #define EXPECT(cond, msg) do { \

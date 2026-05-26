@@ -48,6 +48,14 @@ if(OS_LINUX OR OS_FREEBSD OR OS_OPENBSD)
 endif()
 
 # ───────────────────────────────────────────────────────────────────────────
+# Shared C++ engine (host-agnostic; built only when a C++ plugin needs it).
+# The OBS plugin is pure C and does not link this.
+# ───────────────────────────────────────────────────────────────────────────
+if(BUILD_VST3 OR BUILD_CLAP OR BUILD_PLUGIN_TESTS)
+  add_subdirectory(src/shared-cpp)
+endif()
+
+# ───────────────────────────────────────────────────────────────────────────
 # OBS Studio plugin
 # ───────────────────────────────────────────────────────────────────────────
 if(BUILD_OBS)
@@ -147,4 +155,14 @@ if(BUILD_PLUGIN_TESTS)
     target_link_libraries(test-resampler PRIVATE m)
   endif()
   add_test(NAME resampler COMMAND test-resampler)
+
+  # C++ engine + realtime budget tests (Phase 2). Link the shared-cpp
+  # library which already pulls in zondel-core.
+  add_executable(test-zondel-engine test/test-zondel-engine.cpp)
+  target_link_libraries(test-zondel-engine PRIVATE zondel-shared-cpp)
+  add_test(NAME zondel-engine COMMAND test-zondel-engine)
+
+  add_executable(test-realtime-budget test/test-realtime-budget.cpp)
+  target_link_libraries(test-realtime-budget PRIVATE zondel-shared-cpp)
+  add_test(NAME realtime-budget COMMAND test-realtime-budget)
 endif()

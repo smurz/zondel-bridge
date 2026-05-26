@@ -1,8 +1,13 @@
 /*
- * ZondelController — VST3 EditController stub for Phase 1.
+ * ZondelController — VST3 EditController.
  *
- * No parameters yet. Phase 3 declares Bypass (with kIsBypass flag) and
- * Pipe timeout, plus a Data Exchange API receiver for live status text.
+ * Phase 2: declares Bypass + Pipe timeout parameters with stable IDs
+ * so getState/setState persistence round-trips cleanly across project
+ * save/load. The Bypass parameter is flagged kIsBypass so DAWs that
+ * inspect it render a dedicated bypass button (Studio One, Cubase).
+ *
+ * Phase 3 will add the Data Exchange API receiver for live status text
+ * and an optional VSTGUI view.
  *
  * License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
  */
@@ -19,6 +24,7 @@ public:
     }
 
     Steinberg::tresult PLUGIN_API initialize(Steinberg::FUnknown* context) override;
+    Steinberg::tresult PLUGIN_API setComponentState(Steinberg::IBStream* state) override;
 };
 
 } // namespace Zondel

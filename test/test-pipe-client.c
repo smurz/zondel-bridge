@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include "../src/pipe-client.h"
+#include "pipe-client.h"
 
 static int failures = 0;
 #define EXPECT(cond, msg) do { \

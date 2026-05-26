@@ -3,7 +3,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
-#include "../src/resampler.h"
+#include "resampler.h"
 
 static int failures = 0;
 #define EXPECT(cond, msg) do { \

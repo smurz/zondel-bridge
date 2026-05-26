@@ -25,6 +25,7 @@ FetchContent_MakeAvailable(vst3sdk)
 # `smtg_add_vst3plugin` becomes available after the SDK is added.
 smtg_add_vst3plugin(Zondel
   ZondelIDs.h
+  ZondelParams.h
   ZondelProcessor.h
   ZondelProcessor.cpp
   ZondelController.h
@@ -41,7 +42,7 @@ target_compile_features(Zondel
 target_link_libraries(Zondel
   PRIVATE
     sdk
-    zondel-core    # statically linked; pulls in pipe-client/etc for Phase 2 use
+    zondel-shared-cpp   # pulls in zondel-core (pipe IPC, ring, SRC, etc.)
 )
 
 target_include_directories(Zondel PRIVATE
