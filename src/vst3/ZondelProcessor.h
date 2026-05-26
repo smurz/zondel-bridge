@@ -13,6 +13,7 @@
 #include "public.sdk/source/vst/vstaudioeffect.h"
 #include "public.sdk/source/vst/utility/dataexchange.h"
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 
@@ -51,8 +52,12 @@ public:
     Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) override;
 
 private:
-    bool      _bypass         = false;
-    uint32_t  _pipeTimeoutUs  = 5000;
+    // Bypass and pipe-timeout are written from the audio thread (param
+    // queue in process()) and read from the host's state-save thread
+    // (getState). Atomic to defuse the race a host triggers by
+    // serialising state during playback.
+    std::atomic<bool>     _bypass         { false };
+    std::atomic<uint32_t> _pipeTimeoutUs  { 5000 };
 
     std::unique_ptr<zondel::Engine> _engine;
 

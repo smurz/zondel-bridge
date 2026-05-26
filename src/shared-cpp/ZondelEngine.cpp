@@ -73,8 +73,14 @@ Engine::Engine(double sampleRate, int channels, int maxBlockSize,
     const size_t ringCap = std::max<size_t>(
         kRingCapacityFloor,
         maxAt48k * 2 + static_cast<size_t>(kZondelChunk) * 4);
-    ring_buffer_init(&_sendRing, ringCap);
-    ring_buffer_init(&_recvRing, ringCap);
+    // ring_buffer_init returns 0 on success, non-zero on allocation
+    // failure. primeRecvRing() and process() must not touch an
+    // uninitialised ring (would modulo by zero capacity in
+    // ring-buffer.c). Mark non-viable on either failure.
+    if (ring_buffer_init(&_sendRing, ringCap) != 0 ||
+        ring_buffer_init(&_recvRing, ringCap) != 0) {
+        _viable = false;
+    }
     _ringCapacity = ringCap;
 
     _scratchFrames = scratchCap;
@@ -252,24 +258,33 @@ bool Engine::process(const float* const* inputs,
     const int demandChunks = std::max(4,
         static_cast<int>(src48kFrames / kZondelChunk) + 2);
     const int maxChunks = std::min(demandChunks, recvCapChunks);
+    // After the first pipe failure in this block, stop issuing IPC for
+    // the remaining chunks — each failed round-trip can take up to the
+    // full timeout, so a backlogged block with 4+ chunks could hang the
+    // audio thread for tens of milliseconds. Fall back to pass-through
+    // via the recv ring so the engine stays in steady-state latency.
     int chunksProcessed = 0;
+    bool pipeFailedThisBlock = false;
     while (ring_buffer_fill(&_sendRing) >= static_cast<size_t>(kZondelChunk)) {
         ring_buffer_pop(&_sendRing, _scratchSend, kZondelChunk);
 
-        const int rc = pipe_client_send_recv(
-            _pipe,
-            _scratchSend, _scratchRecv,
-            kZondelChunk, static_cast<uint32_t>(kZondelRate), 1,
-            timeout);
-
         const int prevStatus = _state.status;
-        if (rc == PIPE_OK) {
-            zondel_state_on_success(&_state);
-            ring_buffer_push(&_recvRing, _scratchRecv, kZondelChunk);
+        if (!pipeFailedThisBlock) {
+            const int rc = pipe_client_send_recv(
+                _pipe,
+                _scratchSend, _scratchRecv,
+                kZondelChunk, static_cast<uint32_t>(kZondelRate), 1,
+                timeout);
+            if (rc == PIPE_OK) {
+                zondel_state_on_success(&_state);
+                ring_buffer_push(&_recvRing, _scratchRecv, kZondelChunk);
+            } else {
+                zondel_state_on_failure(&_state, rc, now_ns());
+                ring_buffer_push(&_recvRing, _scratchSend, kZondelChunk);
+                pipeFailedThisBlock = true;
+            }
         } else {
-            zondel_state_on_failure(&_state, rc, now_ns());
-            // Per-block pass-through into the recv ring so latency stays
-            // constant and audio doesn't drop.
+            // Cheap pass-through path for remaining chunks this block.
             ring_buffer_push(&_recvRing, _scratchSend, kZondelChunk);
         }
         if (_state.status != prevStatus)

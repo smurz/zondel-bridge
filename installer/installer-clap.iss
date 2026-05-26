@@ -13,6 +13,12 @@
   #define BuildDir "build_x64"
 #endif
 
+; Build configuration name. Local presets default to RelWithDebInfo;
+; CI builds Release. Pass /DBuildConfig=Release etc.
+#ifndef BuildConfig
+  #define BuildConfig "RelWithDebInfo"
+#endif
+
 [Setup]
 ; Distinct AppId from the OBS and VST3 installers.
 AppId={{93B58F26-1FC0-4D71-B23E-7F2F8E3D4B58}}
@@ -39,7 +45,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 [Files]
 ; CLAP plug-ins ship as a single .clap file (a renamed DLL on Windows).
-Source: "..\{#BuildDir}\src\clap\Release\Zondel.clap"; DestDir: "{app}"; \
+Source: "..\{#BuildDir}\src\clap\{#BuildConfig}\Zondel.clap"; DestDir: "{app}"; \
     Flags: ignoreversion
 
 [UninstallDelete]

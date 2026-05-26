@@ -13,6 +13,12 @@
   #define BuildDir "build_x64"
 #endif
 
+; Build configuration name within the build dir. Local presets default
+; to RelWithDebInfo; CI builds Release. Pass /DBuildConfig=Release etc.
+#ifndef BuildConfig
+  #define BuildConfig "RelWithDebInfo"
+#endif
+
 [Setup]
 ; Distinct AppId from the OBS installer so they uninstall independently.
 AppId={{2E18C5D4-9A3A-4B17-8E0E-9B0C53F6A4D2}}
@@ -46,7 +52,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ;         Zondel.vst3        (the DLL)
 ;       moduleinfo.json
 ;       Resources\           (icons, presets — may be empty)
-Source: "..\{#BuildDir}\VST3\Release\Zondel.vst3\*"; \
+Source: "..\{#BuildDir}\VST3\{#BuildConfig}\Zondel.vst3\*"; \
     DestDir: "{app}\Zondel.vst3"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 

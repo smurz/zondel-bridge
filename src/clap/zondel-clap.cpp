@@ -370,40 +370,50 @@ const clap_plugin_params_t kParamsExt = {
 // state extension — same two-int32 wire format as VST3
 // ────────────────────────────────────────────────────────────────────
 
+// Wire format: two little-endian int32s. Matches VST3 ZondelProcessor's
+// getState()/setState() exactly so cross-format project recall is
+// coherent and the format works on any-endian platforms.
+static void le32_pack(uint8_t* out, int32_t v) {
+    const uint32_t u = static_cast<uint32_t>(v);
+    out[0] = static_cast<uint8_t>(u       & 0xff);
+    out[1] = static_cast<uint8_t>((u >> 8 ) & 0xff);
+    out[2] = static_cast<uint8_t>((u >> 16) & 0xff);
+    out[3] = static_cast<uint8_t>((u >> 24) & 0xff);
+}
+static int32_t le32_unpack(const uint8_t* in) {
+    const uint32_t u = (static_cast<uint32_t>(in[0])      ) |
+                       (static_cast<uint32_t>(in[1]) <<  8) |
+                       (static_cast<uint32_t>(in[2]) << 16) |
+                       (static_cast<uint32_t>(in[3]) << 24);
+    return static_cast<int32_t>(u);
+}
+
 bool CLAP_ABI state_save(const clap_plugin_t* plugin, const clap_ostream_t* stream) {
     auto* s = self(plugin);
-    int32_t bypassWord  = (s->bypassValue.load() >= 0.5) ? 1 : 0;
-    int32_t timeoutWord = static_cast<int32_t>(s->timeoutValue.load() + 0.5);
-    auto writeAll = [stream](const void* buf, size_t n) {
-        size_t total = 0;
-        while (total < n) {
-            int64_t w = stream->write(stream, static_cast<const uint8_t*>(buf) + total,
-                                       n - total);
-            if (w <= 0) return false;
-            total += static_cast<size_t>(w);
-        }
-        return true;
-    };
-    if (!writeAll(&bypassWord, sizeof(bypassWord))) return false;
-    if (!writeAll(&timeoutWord, sizeof(timeoutWord))) return false;
+    uint8_t buf[8];
+    le32_pack(buf,     (s->bypassValue.load() >= 0.5) ? 1 : 0);
+    le32_pack(buf + 4, static_cast<int32_t>(s->timeoutValue.load() + 0.5));
+    size_t total = 0;
+    while (total < sizeof(buf)) {
+        int64_t w = stream->write(stream, buf + total, sizeof(buf) - total);
+        if (w <= 0) return false;
+        total += static_cast<size_t>(w);
+    }
     return true;
 }
 
 bool CLAP_ABI state_load(const clap_plugin_t* plugin, const clap_istream_t* stream) {
     auto* s = self(plugin);
-    auto readAll = [stream](void* buf, size_t n) {
-        size_t total = 0;
-        while (total < n) {
-            int64_t r = stream->read(stream, static_cast<uint8_t*>(buf) + total,
-                                      n - total);
-            if (r <= 0) return false;
-            total += static_cast<size_t>(r);
-        }
-        return true;
-    };
-    int32_t bypassWord = 0, timeoutWord = 5000;
-    if (!readAll(&bypassWord, sizeof(bypassWord))) return false;
-    if (!readAll(&timeoutWord, sizeof(timeoutWord))) return false;
+    uint8_t buf[8];
+    size_t total = 0;
+    while (total < sizeof(buf)) {
+        int64_t r = stream->read(stream, buf + total, sizeof(buf) - total);
+        if (r <= 0) return false;
+        total += static_cast<size_t>(r);
+    }
+    const int32_t bypassWord  = le32_unpack(buf);
+    int32_t       timeoutWord = le32_unpack(buf + 4);
+
     timeoutWord = std::clamp(timeoutWord, static_cast<int32_t>(kPipeTimeoutMin),
                                           static_cast<int32_t>(kPipeTimeoutMax));
     s->bypassValue.store(bypassWord ? 1.0 : 0.0);

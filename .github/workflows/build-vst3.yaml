@@ -49,6 +49,9 @@ jobs:
           $bs = Get-Content -Path buildspec.json -Raw | ConvertFrom-Json
           "version=$($bs.version)" >> $env:GITHUB_OUTPUT
 
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
       - name: Configure
         run: |
           cmake -S . -B build_vst3 `
@@ -106,19 +109,12 @@ jobs:
       - name: Build Inno Setup installer
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) {
-            Write-Warning "Inno Setup not found on runner; skipping installer build."
-            "skipInstaller=true" >> $env:GITHUB_OUTPUT
-            exit 0
-          }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup not installed on runner — check the 'Install Inno Setup' step." }
           $ver = "${{ steps.meta.outputs.version }}"
-          & $iscc /DAppVersion="$ver" /DBuildDir="build_vst3" installer\installer-vst3.iss
+          & $iscc /DAppVersion="$ver" /DBuildDir="build_vst3" /DBuildConfig="Release" installer\installer-vst3.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit $LASTEXITCODE" }
           $exe = Get-ChildItem -Path "installer\Output\Zondel-vst3-v$ver-setup.exe"
           Copy-Item $exe.FullName -Destination release\
-          "exeName=$($exe.Name)" >> $env:GITHUB_OUTPUT
-        id: installer
-        continue-on-error: true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -128,4 +124,4 @@ jobs:
             release/Zondel-vst3-*-windows-x64.zip
             release/Zondel-vst3-*-windows-x64.zip.sha256
             release/Zondel-vst3-*-setup.exe
-          if-no-files-found: warn
+          if-no-files-found: error

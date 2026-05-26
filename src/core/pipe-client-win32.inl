@@ -1,5 +1,20 @@
 /* License: MIT. Copyright (c) 2026 Zondel.
- * Win32 named-pipe client. Filled in across tasks 6-8.
+ *
+ * Win32 named-pipe client. Synchronous round-trip semantics, but
+ * implemented over OVERLAPPED I/O so we can apply a single deadline
+ * across all four wire ops (request header, request payload, response
+ * header, response payload).
+ *
+ * Realtime safety:
+ *   - The event handle used for OVERLAPPED.hEvent is allocated ONCE in
+ *     pipe_client_create() and reused for every read/write. No kernel-
+ *     handle churn on the audio thread.
+ *   - On timeout we CancelIoEx and drain the pending operation with
+ *     GetOverlappedResult(..., TRUE) before returning. Without that
+ *     drain the kernel could still touch the stack-allocated overlapped
+ *     storage (and the caller's payload buffer) after we've returned.
+ *   - The configured timeout_us is the TOTAL deadline for the round-
+ *     trip — not per-op. Each op consumes its share of remaining time.
  */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -7,8 +22,9 @@
 #include <string.h>
 
 struct pipe_client {
-    char  endpoint[256];
+    char   endpoint[256];
     HANDLE handle;
+    HANDLE event;     /* reusable OVERLAPPED.hEvent, manual-reset */
     int    state;
 };
 
@@ -18,12 +34,19 @@ pipe_client_t *pipe_client_create(const char *endpoint) {
     strncpy(c->endpoint, endpoint ? endpoint : "\\\\.\\pipe\\Zondel", sizeof(c->endpoint) - 1);
     c->handle = INVALID_HANDLE_VALUE;
     c->state  = PIPE_DISCONNECTED;
+    /* Manual-reset event so we control the reset moment between ops. */
+    c->event = CreateEventA(NULL, TRUE, FALSE, NULL);
+    if (!c->event) {
+        free(c);
+        return NULL;
+    }
     return c;
 }
 
 void pipe_client_destroy(pipe_client_t *c) {
     if (!c) return;
     if (c->handle != INVALID_HANDLE_VALUE) CloseHandle(c->handle);
+    if (c->event)                          CloseHandle(c->event);
     free(c);
 }
 
@@ -57,70 +80,77 @@ static void disconnect(pipe_client_t *c) {
     c->state = PIPE_DISCONNECTED;
 }
 
-/* Synchronous overlapped write that waits up to timeout_ms. */
-static int overlapped_write(HANDLE h, const void *buf, DWORD n, DWORD timeout_ms) {
-    OVERLAPPED ovl = {0};
-    ovl.hEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
-    if (!ovl.hEvent) return PIPE_ERR_WRITE_FAILED;
-
-    int rc = PIPE_OK;
-    DWORD written = 0;
-    BOOL ok = WriteFile(h, buf, n, &written, &ovl);
-    if (!ok && GetLastError() == ERROR_IO_PENDING) {
-        DWORD wait = WaitForSingleObject(ovl.hEvent, timeout_ms);
-        if (wait == WAIT_OBJECT_0) {
-            if (!GetOverlappedResult(h, &ovl, &written, FALSE) || written != n)
-                rc = PIPE_ERR_WRITE_FAILED;
-        } else {
-            rc = PIPE_ERR_WRITE_FAILED;
-        }
-    } else if (!ok || written != n) {
-        rc = PIPE_ERR_WRITE_FAILED;
-    }
-
-    CloseHandle(ovl.hEvent);
-    return rc;
+/* Cancel a pending overlapped op and wait for the kernel to acknowledge
+ * the cancellation. Essential before reusing the OVERLAPPED structure or
+ * letting the caller's payload buffer go out of scope: without it, the
+ * kernel can keep writing into the buffer after we return. */
+static void cancel_and_drain(HANDLE h, OVERLAPPED *ovl) {
+    CancelIoEx(h, ovl);
+    DWORD discard = 0;
+    /* TRUE = wait until the cancellation completes. Returns quickly. */
+    (void)GetOverlappedResult(h, ovl, &discard, TRUE);
 }
 
-/* Synchronous overlapped read with explicit timeout. Returns PIPE_OK, PIPE_ERR_READ_TIMEOUT,
- * or PIPE_ERR_WRITE_FAILED on other errors. timed_out is set 1 only on timeout. */
-static int overlapped_read(HANDLE h, void *buf, DWORD n, DWORD timeout_ms, int *timed_out) {
-    *timed_out = 0;
-    OVERLAPPED ovl = {0};
-    ovl.hEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
-    if (!ovl.hEvent) return PIPE_ERR_WRITE_FAILED;
+/* One overlapped operation (read or write) with a remaining-time
+ * budget. Returns PIPE_OK, PIPE_ERR_READ_TIMEOUT (timeout while
+ * waiting), or PIPE_ERR_WRITE_FAILED (any other error). On timeout the
+ * pending I/O has been cancelled and drained. */
+static int overlapped_op(HANDLE h, HANDLE event, OVERLAPPED *ovl,
+                         BOOL is_write, void *buf, DWORD n,
+                         DWORD timeout_ms) {
+    ResetEvent(event);
+    ovl->Internal = 0;
+    ovl->InternalHigh = 0;
+    ovl->Offset = 0;
+    ovl->OffsetHigh = 0;
+    ovl->hEvent = event;
 
-    int rc = PIPE_OK;
-    DWORD got = 0;
-    BOOL ok = ReadFile(h, buf, n, &got, &ovl);
-    if (!ok && GetLastError() == ERROR_IO_PENDING) {
-        DWORD wait = WaitForSingleObject(ovl.hEvent, timeout_ms);
-        if (wait == WAIT_OBJECT_0) {
-            if (!GetOverlappedResult(h, &ovl, &got, FALSE) || got != n)
-                rc = PIPE_ERR_WRITE_FAILED;
-        } else if (wait == WAIT_TIMEOUT) {
-            *timed_out = 1;
-            rc = PIPE_ERR_READ_TIMEOUT;
-        } else {
-            rc = PIPE_ERR_WRITE_FAILED;
-        }
-    } else if (!ok || got != n) {
-        rc = PIPE_ERR_WRITE_FAILED;
+    DWORD transferred = 0;
+    BOOL ok = is_write
+        ? WriteFile(h, buf, n, &transferred, ovl)
+        : ReadFile(h, buf, n, &transferred, ovl);
+
+    if (ok) {
+        return (transferred == n) ? PIPE_OK : PIPE_ERR_WRITE_FAILED;
+    }
+    if (GetLastError() != ERROR_IO_PENDING) {
+        return PIPE_ERR_WRITE_FAILED;
     }
 
-    CloseHandle(ovl.hEvent);
-    return rc;
+    DWORD wait = WaitForSingleObject(event, timeout_ms);
+    if (wait == WAIT_OBJECT_0) {
+        if (!GetOverlappedResult(h, ovl, &transferred, FALSE) || transferred != n)
+            return PIPE_ERR_WRITE_FAILED;
+        return PIPE_OK;
+    }
+    if (wait == WAIT_TIMEOUT) {
+        cancel_and_drain(h, ovl);
+        return PIPE_ERR_READ_TIMEOUT;
+    }
+    cancel_and_drain(h, ovl);
+    return PIPE_ERR_WRITE_FAILED;
+}
+
+/* Remaining milliseconds against a tick-count deadline. Returns 0 if
+ * already past the deadline so callers can short-circuit. */
+static DWORD remaining_ms(ULONGLONG deadline_tick) {
+    ULONGLONG now = GetTickCount64();
+    if (now >= deadline_tick) return 0;
+    return (DWORD)(deadline_tick - now);
 }
 
 int pipe_client_send_recv(pipe_client_t *c,
                           const float *send_interleaved, float *recv_interleaved,
                           uint32_t frames, uint32_t sample_rate, uint16_t channels,
                           uint32_t timeout_us) {
+    if (!c || !c->event) return PIPE_ERR_NOT_CONNECTED;
+
     int rc = try_connect(c);
     if (rc != PIPE_OK) return rc;
 
-    DWORD timeout_ms = (timeout_us + 999) / 1000;
-    if (timeout_ms == 0) timeout_ms = 1;
+    DWORD total_timeout_ms = (timeout_us + 999) / 1000;
+    if (total_timeout_ms == 0) total_timeout_ms = 1;
+    const ULONGLONG deadline = GetTickCount64() + total_timeout_ms;
 
     uint32_t payload_bytes = frames * channels * sizeof(float);
 
@@ -137,15 +167,20 @@ int pipe_client_send_recv(pipe_client_t *c,
     reqHdr[8] = (unsigned char)(channels        & 0xff);
     reqHdr[9] = (unsigned char)((channels >>  8) & 0xff);
 
-    rc = overlapped_write(c->handle, reqHdr, 10, timeout_ms);
+    OVERLAPPED ovl = {0};
+
+    rc = overlapped_op(c->handle, c->event, &ovl, TRUE, reqHdr, 10,
+                       remaining_ms(deadline));
     if (rc != PIPE_OK) { disconnect(c); return rc; }
 
-    rc = overlapped_write(c->handle, send_interleaved, payload_bytes, timeout_ms);
+    rc = overlapped_op(c->handle, c->event, &ovl, TRUE,
+                       (void *)send_interleaved, payload_bytes,
+                       remaining_ms(deadline));
     if (rc != PIPE_OK) { disconnect(c); return rc; }
 
-    int timed_out = 0;
     unsigned char respHdr[5];
-    rc = overlapped_read(c->handle, respHdr, 5, timeout_ms, &timed_out);
+    rc = overlapped_op(c->handle, c->event, &ovl, FALSE, respHdr, 5,
+                       remaining_ms(deadline));
     if (rc != PIPE_OK) { disconnect(c); return rc; }
 
     uint32_t echoedFrames = (uint32_t)respHdr[0]
@@ -156,9 +191,21 @@ int pipe_client_send_recv(pipe_client_t *c,
         disconnect(c);
         return PIPE_ERR_PROTOCOL;
     }
+    /* Status byte (per docs/PROTOCOL.md): 0 = ok. Reject anything else
+     * as a protocol/remote-side failure; we still drain the payload to
+     * keep the pipe in sync with the server. */
+    const unsigned char respStatus = respHdr[4];
 
-    rc = overlapped_read(c->handle, recv_interleaved, payload_bytes, timeout_ms, &timed_out);
+    rc = overlapped_op(c->handle, c->event, &ovl, FALSE, recv_interleaved,
+                       payload_bytes, remaining_ms(deadline));
     if (rc != PIPE_OK) { disconnect(c); return rc; }
+
+    if (respStatus != 0) {
+        /* Pipe is still in sync (we drained the payload) but the server
+         * signalled a logical error — pass it up as a protocol failure
+         * so the caller can fall back to pass-through this block. */
+        return PIPE_ERR_PROTOCOL;
+    }
 
     return PIPE_OK;
 }
