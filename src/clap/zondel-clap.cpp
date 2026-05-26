@@ -23,6 +23,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -329,8 +330,12 @@ bool CLAP_ABI params_text_to_value(const clap_plugin_t*, clap_id id,
             }
             return false;
         case kParamPipeTimeout: {
-            int us = std::atoi(text);
-            if (us <= 0) return false;
+            // strtol gives us a clean errno path and end-pointer check;
+            // atoi silently returns 0 on garbage and has implementation-
+            // defined behaviour on overflow.
+            char* endptr = nullptr;
+            const long us = std::strtol(text, &endptr, 10);
+            if (endptr == text || us <= 0) return false;
             *out_value = std::clamp(static_cast<double>(us),
                                     kPipeTimeoutMin, kPipeTimeoutMax);
             return true;

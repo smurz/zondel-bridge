@@ -194,11 +194,12 @@ tresult PLUGIN_API ZondelProcessor::process(ProcessData& data) {
     }
 
     _engine->process(inBus.channelBuffers32, outBus.channelBuffers32, frames, _bypass);
-    // The engine can emit non-silent delayed audio even when the host
-    // flagged the input as silent (queued from prior blocks, or noise-
-    // suppression residual). Clear the output silence flags; hosts that
-    // skip silent blocks would otherwise discard our tail.
-    outBus.silenceFlags = 0;
+    // In bypass mode the engine does a straight memcpy with no delay,
+    // so the output silence state matches the input. Outside bypass the
+    // engine can emit non-silent delayed audio even when the input is
+    // silent (queued from prior blocks); clearing the flag prevents
+    // hosts that skip silent buffers from discarding our tail.
+    outBus.silenceFlags = _bypass ? inBus.silenceFlags : 0;
 
     // Push a status update if the engine's state has changed since the
     // last block we sent. Single int32 + uint64, fits in 16 bytes.

@@ -24,8 +24,14 @@ uint64_t now_ns() noexcept {
         duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count());
 }
 
-constexpr size_t kRingCapacity = 8192;  // matches OBS plugin
-constexpr size_t kScratchSlack = 32;    // SRC overshoot tolerance
+// Floor for the ring buffer capacity (48 kHz mono samples). The actual
+// capacity is derived from maxBlockSize in the constructor — we need
+// room for the worst-case host block resampled up to 48 kHz, the
+// one-chunk PDC pre-fill in recv, and a few chunks of headroom while
+// drain catches up. This floor covers up to ~8 k host samples
+// comfortably; anything bigger gets a proportionally larger ring.
+constexpr size_t kRingCapacityFloor = 16384;
+constexpr size_t kScratchSlack     = 32;    // SRC overshoot tolerance
 
 } // namespace
 
@@ -40,9 +46,6 @@ Engine::Engine(double sampleRate, int channels, int maxBlockSize,
     if (!pipeEndpoint || !*pipeEndpoint)
         pipeEndpoint = "\\\\.\\pipe\\Zondel";
     _pipe = pipe_client_create(pipeEndpoint);
-
-    ring_buffer_init(&_sendRing, kRingCapacity);
-    ring_buffer_init(&_recvRing, kRingCapacity);
 
     _srcActive = (sampleRate != kZondelRate);
     if (_srcActive) {
@@ -63,6 +66,17 @@ Engine::Engine(double sampleRate, int channels, int maxBlockSize,
     const size_t scratchCap = std::max<size_t>(static_cast<size_t>(maxBlockSize),
                                                 maxAt48k);
 
+    // Ring capacity scaled to the worst case so a single very large host
+    // block can drain enough chunks without overflowing recv (defends
+    // against Codex's "8192-sample block + 17-chunk drain > 8192 ring"
+    // overflow scenario).
+    const size_t ringCap = std::max<size_t>(
+        kRingCapacityFloor,
+        maxAt48k * 2 + static_cast<size_t>(kZondelChunk) * 4);
+    ring_buffer_init(&_sendRing, ringCap);
+    ring_buffer_init(&_recvRing, ringCap);
+    _ringCapacity = ringCap;
+
     _scratchFrames = scratchCap;
     _monoIn       = static_cast<float*>(std::calloc(scratchCap, sizeof(float)));
     _srate48k     = static_cast<float*>(std::calloc(scratchCap, sizeof(float)));
@@ -81,9 +95,7 @@ Engine::Engine(double sampleRate, int channels, int maxBlockSize,
     // and host PDC). Without this, when the host block size doesn't line
     // up with kZondelChunk (e.g. 256/512/1024 at 48 kHz), recv would
     // sometimes underflow and we'd zero-pad mid-stream — audible clicks.
-    if (_viable) {
-        ring_buffer_push(&_recvRing, _scratchSend, kZondelChunk); // _scratchSend is zeroed by calloc
-    }
+    primeRecvRing();
 }
 
 Engine::~Engine() {
@@ -99,19 +111,19 @@ Engine::~Engine() {
 }
 
 void Engine::rebuildStatusSnapshot() noexcept {
-    // Audio-thread writer: mirror the latest plain-int status into the
-    // atomic before bumping the counter so cross-thread readers see a
-    // consistent (status, counter) pair via acquire on the counter.
-    _statusMirror.store(_state.status, std::memory_order_relaxed);
+    // Each atomic is independently release/acquire-synchronised. The
+    // counter is only used as a change-detector by the wrapper (see
+    // ZondelProcessor::process); the snapshot can be "torn" across the
+    // pair of loads but that is benign — the wrapper would just emit
+    // one extra Data Exchange block with the latest status to catch up.
+    _statusMirror.store(_state.status, std::memory_order_release);
     _updateCounter.fetch_add(1, std::memory_order_release);
 }
 
 Engine::StatusSnapshot Engine::status() const noexcept {
     StatusSnapshot s;
-    // Acquire the counter first, then the status — pairs with the
-    // release in rebuildStatusSnapshot().
     s.updateCounter = _updateCounter.load(std::memory_order_acquire);
-    s.status        = _statusMirror.load(std::memory_order_relaxed);
+    s.status        = _statusMirror.load(std::memory_order_acquire);
     return s;
 }
 
@@ -122,11 +134,25 @@ void Engine::setPipeTimeoutMicros(uint32_t us) noexcept {
 }
 
 uint32_t Engine::getLatencySamples() const noexcept {
+    // Non-viable engines fall through to pass-through with zero latency.
+    if (!_viable) return 0;
     // The engine introduces one chunk of delay (480 samples at 48 kHz)
     // because it accumulates a full block before sending. Convert to
     // host sample rate.
     return static_cast<uint32_t>(
         static_cast<double>(kZondelChunk) * _sampleRate / kZondelRate + 0.5);
+}
+
+void Engine::primeRecvRing() noexcept {
+    // Re-establish the steady-state one-chunk delay in recv after a
+    // reset. `_scratchSend` is zero-initialised by calloc on construction
+    // and gets zeroed again every time we send/receive, so we use it as
+    // a convenient pre-fill source. (Even if it had stale content from a
+    // previous chunk, that content was already pushed to the ring as the
+    // round-trip result; we're just pushing zeros from its buffer.)
+    if (!_viable) return;
+    static const float zeros[kZondelChunk] = {0};
+    ring_buffer_push(&_recvRing, zeros, kZondelChunk);
 }
 
 bool Engine::process(const float* const* inputs,
@@ -154,22 +180,30 @@ bool Engine::process(const float* const* inputs,
         return false;
     }
 
-    if (bypass) {
-        passThrough();
-        return false;
-    }
+    // Short-circuit transition: when entering bypass / back-off /
+    // unsupported, the rings still hold pre-bypass delayed audio. Letting
+    // them sit and then unbypassing causes that stale audio to surface
+    // ~10 ms later. Reset and re-prime so resumed processing starts clean.
+    const bool shortCircuit =
+        bypass ||
+        zondel_state_should_skip(&_state, now_ns()) ||
+        (_channels != 1 && _channels != 2);
 
-    if (zondel_state_should_skip(&_state, now_ns())) {
+    if (shortCircuit) {
+        if (!_inShortCircuit) {
+            ring_buffer_reset(&_sendRing);
+            ring_buffer_reset(&_recvRing);
+            primeRecvRing();
+            _inShortCircuit = true;
+        }
+        if (_channels != 1 && _channels != 2) {
+            zondel_state_on_unsupported_format(&_state);
+            rebuildStatusSnapshot();
+        }
         passThrough();
         return false;
     }
-
-    if (_channels != 1 && _channels != 2) {
-        zondel_state_on_unsupported_format(&_state);
-        rebuildStatusSnapshot();
-        passThrough();
-        return false;
-    }
+    _inShortCircuit = false;
 
     // Defensive: if a host violates the maxBlockSize contract, fall back
     // to pass-through rather than overrun scratch. Should never happen
@@ -209,10 +243,15 @@ bool Engine::process(const float* const* inputs,
     // The drain cap must keep up with the host block — at large block
     // sizes (e.g. 2048 samples at 48 kHz) we need 4+ chunks per call to
     // avoid ring overflow / send-ring growth. Compute a dynamic ceiling
-    // with +2 headroom for SRC overshoot.
+    // with +2 headroom for SRC overshoot, but also bound by recv free
+    // space so we don't overrun the ring on absurd block sizes.
     const uint32_t timeout = _timeoutMicros.load(std::memory_order_relaxed);
-    const int maxChunks = std::max(4,
+    const size_t recvFree =
+        _ringCapacity - ring_buffer_fill(&_recvRing);
+    const int recvCapChunks = static_cast<int>(recvFree / kZondelChunk);
+    const int demandChunks = std::max(4,
         static_cast<int>(src48kFrames / kZondelChunk) + 2);
+    const int maxChunks = std::min(demandChunks, recvCapChunks);
     int chunksProcessed = 0;
     while (ring_buffer_fill(&_sendRing) >= static_cast<size_t>(kZondelChunk)) {
         ring_buffer_pop(&_sendRing, _scratchSend, kZondelChunk);

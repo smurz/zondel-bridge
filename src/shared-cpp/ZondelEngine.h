@@ -80,6 +80,7 @@ public:
 
 private:
     void rebuildStatusSnapshot() noexcept;
+    void primeRecvRing() noexcept;
 
     const double   _sampleRate;
     const int      _channels;
@@ -97,6 +98,7 @@ private:
 
     ring_buffer_t  _sendRing {};
     ring_buffer_t  _recvRing {};
+    size_t         _ringCapacity = 0;   // capacity passed to ring_buffer_init
 
     // Pre-allocated scratch (sized in ctor; never realloc'd).
     float*         _monoIn    = nullptr;  // downmixed input at host SR
@@ -114,8 +116,15 @@ private:
     // read non-atomically per the C++ memory model.
     std::atomic<int>      _statusMirror  { 0 };
     // False when ctor allocation failed. process() short-circuits to
-    // pass-through when not viable.
-    bool                  _viable = true;
+    // pass-through when not viable. Audio thread reads; writer is the
+    // ctor (a single store before audio thread is allowed to enter
+    // process()), so a plain `bool` is race-free on x86/64. Made atomic
+    // anyway to silence TSAN and document the cross-thread access.
+    std::atomic<bool>     _viable { true };
+    // Tracks "previous block was in short-circuit" so we only reset the
+    // rings once on the transition INTO short-circuit, not every block.
+    // Audio-thread only; no atomic required.
+    bool                  _inShortCircuit = false;
 
     static constexpr int    kZondelChunk = 480;     // samples
     static constexpr double kZondelRate  = 48000.0;
