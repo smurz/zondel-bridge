@@ -15,6 +15,20 @@ namespace Zondel {
 using namespace Steinberg;
 using namespace Steinberg::Vst;
 
+namespace {
+
+// Map zondel::Engine status (zondel-core enum) onto our string-list
+// indices kStatus*. Single source of truth so the processor and
+// controller can't drift.
+int32 statusFromEngine(int engineStatus) {
+    // zondel-core's enum zondel_status: UNKNOWN=0, CONNECTING=1,
+    // CONNECTED=2, DISCONNECTED=3, BACKED_OFF=4, UNSUPPORTED_FORMAT=5.
+    if (engineStatus < 0 || engineStatus > 5) return kStatusUnknown;
+    return engineStatus;
+}
+
+} // namespace
+
 ZondelProcessor::ZondelProcessor() {
     setControllerClass(kZondelControllerUID);
 }
@@ -35,6 +49,34 @@ tresult PLUGIN_API ZondelProcessor::initialize(FUnknown* context) {
 tresult PLUGIN_API ZondelProcessor::terminate() {
     _engine.reset();
     return AudioEffect::terminate();
+}
+
+tresult PLUGIN_API ZondelProcessor::connect(IConnectionPoint* other) {
+    auto r = AudioEffect::connect(other);
+    if (r == kResultTrue) {
+        // One small block per state change. Two blocks queued is enough:
+        // worst case the controller falls one block behind under load
+        // and catches up next cycle.
+        auto cfg = [](DataExchangeHandler::Config& config,
+                      const ProcessSetup& /*setup*/) {
+            config.blockSize    = sizeof(StatusBlock);
+            config.numBlocks    = 2;
+            config.alignment    = 32;
+            config.userContextID = 0;
+            return true;
+        };
+        _dataExchange = std::make_unique<DataExchangeHandler>(this, cfg);
+        _dataExchange->onConnect(other, getHostContext());
+    }
+    return r;
+}
+
+tresult PLUGIN_API ZondelProcessor::disconnect(IConnectionPoint* other) {
+    if (_dataExchange) {
+        _dataExchange->onDisconnect(other);
+        _dataExchange.reset();
+    }
+    return AudioEffect::disconnect(other);
 }
 
 tresult PLUGIN_API ZondelProcessor::setBusArrangements(
@@ -60,18 +102,17 @@ tresult PLUGIN_API ZondelProcessor::canProcessSampleSize(int32 symbolicSampleSiz
 }
 
 tresult PLUGIN_API ZondelProcessor::setupProcessing(ProcessSetup& newSetup) {
-    // setupProcessing is host-thread, plugin inactive: safe to allocate.
     tresult r = AudioEffect::setupProcessing(newSetup);
     if (r != kResultOk)
         return r;
 
     SpeakerArrangement arr {};
     if (getBusArrangement(BusDirections::kInput, 0, arr) != kResultOk)
-        return kResultOk; // Will retry on next setActive cycle.
+        return kResultOk;
 
     const int channels = SpeakerArr::getChannelCount(arr);
     if (channels != 1 && channels != 2)
-        return kResultOk; // Unsupported arrangement; engine stays null, process() passes through.
+        return kResultOk;
 
     _engine = std::make_unique<zondel::Engine>(
         newSetup.sampleRate,
@@ -79,12 +120,17 @@ tresult PLUGIN_API ZondelProcessor::setupProcessing(ProcessSetup& newSetup) {
         static_cast<int>(newSetup.maxSamplesPerBlock),
         nullptr);
     _engine->setPipeTimeoutMicros(_pipeTimeoutUs);
+    _lastSentStatusCounter = 0;
 
     return kResultOk;
 }
 
 tresult PLUGIN_API ZondelProcessor::setActive(TBool state) {
-    // No allocation here — setActive may be called on the audio thread.
+    if (state && _dataExchange)
+        _dataExchange->onActivate(processSetup);
+    else if (!state && _dataExchange)
+        _dataExchange->onDeactivate();
+
     return AudioEffect::setActive(state);
 }
 
@@ -103,7 +149,6 @@ tresult PLUGIN_API ZondelProcessor::process(ProcessData& data) {
                             _bypass = (value >= 0.5);
                             break;
                         case kParamPipeTimeout: {
-                            // Stored normalised; convert back to microseconds in [1000, 20000].
                             uint32_t us = static_cast<uint32_t>(
                                 kPipeTimeoutMinUs +
                                 value * (kPipeTimeoutMaxUs - kPipeTimeoutMinUs) + 0.5);
@@ -127,7 +172,6 @@ tresult PLUGIN_API ZondelProcessor::process(ProcessData& data) {
     const int32 chans  = (inBus.numChannels < outBus.numChannels)
                              ? inBus.numChannels : outBus.numChannels;
 
-    // Helper for the pass-through fallback paths.
     auto passThrough = [&]() {
         for (int32 ch = 0; ch < chans; ++ch) {
             if (inBus.channelBuffers32[ch] != outBus.channelBuffers32[ch]) {
@@ -139,34 +183,38 @@ tresult PLUGIN_API ZondelProcessor::process(ProcessData& data) {
         outBus.silenceFlags = inBus.silenceFlags;
     };
 
-    // Offline / prefetch rendering: pass through. The Zondel app is a
-    // realtime DSP; rendering offline-faster-than-realtime would race
-    // the pipe round-trip.
     if (data.processMode == kOffline || data.processMode == kPrefetch) {
         passThrough();
         return kResultOk;
     }
 
-    // Null-engine guard: setupProcessing didn't build one (e.g. host
-    // called with an unsupported arrangement). Pass-through, never crash.
     if (!_engine) {
         passThrough();
         return kResultOk;
     }
 
-    // Bypass shortcut. Engine handles bypass internally but doing it
-    // here lets us skip the pipe round-trip entirely.
-    const bool processedByZondel = _engine->process(
-        inBus.channelBuffers32,
-        outBus.channelBuffers32,
-        frames,
-        _bypass);
-
-    // Engine returns false when the data was passed through (bypass /
-    // unsupported / disconnected). In any case, silence-flag bookkeeping
-    // mirrors the input.
-    (void)processedByZondel;
+    _engine->process(inBus.channelBuffers32, outBus.channelBuffers32, frames, _bypass);
     outBus.silenceFlags = inBus.silenceFlags;
+
+    // Push a status update if the engine's state has changed since the
+    // last block we sent. Single int32 + uint64, fits in 16 bytes.
+    if (_dataExchange) {
+        const auto snap = _engine->status();
+        if (snap.updateCounter != _lastSentStatusCounter) {
+            auto block = _dataExchange->getCurrentOrNewBlock();
+            if (block.blockID != InvalidDataExchangeBlockID && block.data) {
+                auto* sb = static_cast<StatusBlock*>(block.data);
+                sb->status = statusFromEngine(snap.status);
+                sb->_pad   = 0;
+                sb->updateCounter = snap.updateCounter;
+                _dataExchange->sendCurrentBlock();
+                _lastSentStatusCounter = snap.updateCounter;
+            }
+            // If we couldn't get a block (queue full), try again next
+            // process() call — the updateCounter check ensures we'll
+            // retry, not drop the message.
+        }
+    }
 
     return kResultOk;
 }
@@ -177,18 +225,15 @@ uint32 PLUGIN_API ZondelProcessor::getLatencySamples() {
 
 tresult PLUGIN_API ZondelProcessor::getState(IBStream* state) {
     if (!state) return kResultFalse;
-
     IBStreamer s(state, kLittleEndian);
     const int32 bypassWord = _bypass ? 1 : 0;
     if (!s.writeInt32(bypassWord)) return kResultFalse;
     if (!s.writeInt32(static_cast<int32>(_pipeTimeoutUs))) return kResultFalse;
-
     return kResultOk;
 }
 
 tresult PLUGIN_API ZondelProcessor::setState(IBStream* state) {
     if (!state) return kResultFalse;
-
     IBStreamer s(state, kLittleEndian);
     int32 bypassWord = 0;
     int32 timeoutWord = 5000;
@@ -196,9 +241,6 @@ tresult PLUGIN_API ZondelProcessor::setState(IBStream* state) {
     if (!s.readInt32(timeoutWord)) return kResultFalse;
 
     _bypass = (bypassWord != 0);
-
-    // Clamp to valid range; project files from older / future versions
-    // shouldn't be able to wedge us into a bad timeout.
     if (timeoutWord < static_cast<int32>(kPipeTimeoutMinUs))
         timeoutWord = static_cast<int32>(kPipeTimeoutMinUs);
     if (timeoutWord > static_cast<int32>(kPipeTimeoutMaxUs))
@@ -206,7 +248,6 @@ tresult PLUGIN_API ZondelProcessor::setState(IBStream* state) {
     _pipeTimeoutUs = static_cast<uint32_t>(timeoutWord);
 
     if (_engine) _engine->setPipeTimeoutMicros(_pipeTimeoutUs);
-
     return kResultOk;
 }
 

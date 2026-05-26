@@ -2,16 +2,18 @@
  * ZondelProcessor — VST3 audio effect that bridges the host audio path
  * to the Zondel desktop app via a Windows named pipe.
  *
- * Phase 2: wired to zondel::Engine; supports getState/setState for
- * project persistence; reports PDC via getLatencySamples; passes through
- * cleanly in kOffline mode and when the engine is unavailable.
+ * Phase 3: pushes engine state (Connected / Disconnected / etc.) to the
+ * controller via the VST3 Data Exchange API (SDK >= 3.7.9). One-way,
+ * lock-free, audio-thread-safe.
  *
  * License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
  */
 #pragma once
 
 #include "public.sdk/source/vst/vstaudioeffect.h"
+#include "public.sdk/source/vst/utility/dataexchange.h"
 
+#include <cstdint>
 #include <memory>
 
 namespace zondel { class Engine; }
@@ -30,6 +32,9 @@ public:
     Steinberg::tresult PLUGIN_API initialize(Steinberg::FUnknown* context) override;
     Steinberg::tresult PLUGIN_API terminate() override;
 
+    Steinberg::tresult PLUGIN_API connect(Steinberg::Vst::IConnectionPoint* other) override;
+    Steinberg::tresult PLUGIN_API disconnect(Steinberg::Vst::IConnectionPoint* other) override;
+
     Steinberg::tresult PLUGIN_API setBusArrangements(
         Steinberg::Vst::SpeakerArrangement* inputs, Steinberg::int32 numIns,
         Steinberg::Vst::SpeakerArrangement* outputs, Steinberg::int32 numOuts) override;
@@ -46,14 +51,15 @@ public:
     Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) override;
 
 private:
-    // Persisted parameters (mirrored to controller via setComponentState).
     bool      _bypass         = false;
     uint32_t  _pipeTimeoutUs  = 5000;
 
-    // Engine owned for the active processing session. Allocated in
-    // setupProcessing (host thread, plugin inactive); never reallocated
-    // in setActive or process.
     std::unique_ptr<zondel::Engine> _engine;
+
+    // Data Exchange handler — initialised on connect(), torn down on
+    // disconnect(). Activated/deactivated by setActive().
+    std::unique_ptr<Steinberg::Vst::DataExchangeHandler> _dataExchange;
+    uint64_t _lastSentStatusCounter = 0;
 };
 
 } // namespace Zondel
