@@ -1,4 +1,4 @@
-/* License: GPL-2.0-or-later. Copyright (c) 2026 Zondel. */
+/* License: GPL-3.0-or-later. Copyright (c) 2026 Zondel. */
 #include <obs-module.h>
 #include <plugin-support.h>
 #include "zondel-filter.h"

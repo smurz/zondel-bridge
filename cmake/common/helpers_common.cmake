@@ -37,11 +37,19 @@ function(check_uuid uuid_string return_value)
   set(${return_value} ${valid_uuid} PARENT_SCOPE)
 endfunction()
 
+# Plugin-support is OBS-only. Look in the legacy `src/` path first (upstream
+# template default), then in `src/obs/` (this repo's multi-plugin layout).
+set(_plugin_support_dir "")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin-support.c.in")
-  configure_file(src/plugin-support.c.in plugin-support.c @ONLY)
+  set(_plugin_support_dir "src")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/obs/plugin-support.c.in")
+  set(_plugin_support_dir "src/obs")
+endif()
+if(_plugin_support_dir)
+  configure_file(${_plugin_support_dir}/plugin-support.c.in plugin-support.c @ONLY)
   add_library(plugin-support STATIC)
-  target_sources(plugin-support PRIVATE plugin-support.c PUBLIC src/plugin-support.h)
-  target_include_directories(plugin-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_sources(plugin-support PRIVATE plugin-support.c PUBLIC ${_plugin_support_dir}/plugin-support.h)
+  target_include_directories(plugin-support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/${_plugin_support_dir}")
   if(OS_LINUX OR OS_FREEBSD OR OS_OPENBSD)
     # add fPIC on Linux to prevent shared object errors
     set_property(TARGET plugin-support PROPERTY POSITION_INDEPENDENT_CODE ON)

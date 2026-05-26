@@ -1,4 +1,4 @@
-; License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
+; License: GPL-3.0-or-later. Copyright (c) 2026 Zondel.
 ; Built with Inno Setup 6.
 
 #ifndef AppVersion
@@ -11,8 +11,8 @@ AppName=Zondel for OBS Studio
 AppVersion={#AppVersion}
 AppPublisher=Zondel
 AppPublisherURL=https://zondel.net
-AppSupportURL=https://github.com/smurz/zondel-obs-plugin/issues
-AppUpdatesURL=https://github.com/smurz/zondel-obs-plugin/releases
+AppSupportURL=https://github.com/smurz/zondel-bridge/issues
+AppUpdatesURL=https://github.com/smurz/zondel-bridge/releases
 DefaultDirName={autopf}\obs-studio
 DefaultGroupName=Zondel for OBS Studio
 DisableProgramGroupPage=yes

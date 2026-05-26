@@ -40,7 +40,7 @@ planned for v2.
 - OBS Studio 31.1 or newer
 - [Zondel](https://zondel.net/download) — paid desktop app
 
-The plugin itself is free and GPLv2+. Zondel is a separate commercial product.
+The plugin itself is free and GPLv3+. Zondel is a separate commercial product.
 This plugin does nothing useful without it; if you just want a free OBS noise
 filter, OBS already includes RNNoise out of the box.
 
@@ -49,7 +49,7 @@ filter, OBS already includes RNNoise out of the box.
 ### Option A — Installer (recommended)
 
 1. Download `zondel-obs-plugin-vX.Y.Z-setup.exe` from the
-   [latest release](https://github.com/smurz/zondel-obs-plugin/releases/latest).
+   [latest release](https://github.com/smurz/zondel-bridge/releases/latest).
 2. Close OBS if it's open.
 3. Run the installer. It will detect your OBS install and place files in:
    - `%ProgramFiles%\obs-studio\obs-plugins\64bit\zondel-obs-plugin.dll`
@@ -133,8 +133,8 @@ parties are welcome to build their own bridges.
 ## Build from source
 
 ```powershell
-git clone https://github.com/smurz/zondel-obs-plugin.git
-cd zondel-obs-plugin
+git clone https://github.com/smurz/zondel-bridge.git
+cd zondel-bridge
 cmake --preset windows-x64
 cmake --build --preset windows-x64 --config RelWithDebInfo
 ```
@@ -144,11 +144,12 @@ are fetched automatically via `buildspec.json`.
 
 ## License
 
-GPLv2+, same as OBS Studio. See [LICENSE](LICENSE).
+GPLv3+. (OBS Studio itself is GPLv2+, which is forward-compatible — recipients
+may use this plugin under GPLv3 alongside an OBS install.) See [LICENSE](LICENSE).
 
 ## Issues and support
 
-- Plugin bugs: [GitHub issues](https://github.com/smurz/zondel-obs-plugin/issues)
+- Plugin bugs: [GitHub issues](https://github.com/smurz/zondel-bridge/issues)
 - Zondel app bugs or DSP feedback: <https://zondel.net/support>
 
 ---

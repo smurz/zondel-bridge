@@ -1,4 +1,4 @@
-/* License: GPL-2.0-or-later. Copyright (c) 2026 Zondel. */
+/* License: GPL-3.0-or-later. Copyright (c) 2026 Zondel. */
 #include "downmix.h"
 
 void downmix_stereo_to_mono(const float *left, const float *right, float *dst, size_t frames) {
