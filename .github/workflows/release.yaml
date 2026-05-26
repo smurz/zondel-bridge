@@ -8,8 +8,17 @@ permissions:
   contents: write
 
 jobs:
+  # OBS plug-in build (existing flow).
   build:
     uses: ./.github/workflows/build-project.yaml
+
+  # VST3 plug-in build — fan out in parallel via workflow_call.
+  vst3:
+    uses: ./.github/workflows/build-vst3.yaml
+
+  # CLAP plug-in build — same pattern.
+  clap:
+    uses: ./.github/workflows/build-clap.yaml
 
   installer:
     needs: build
@@ -89,7 +98,7 @@ jobs:
           path: installer/Output/*.exe
 
   release:
-    needs: [build, installer]
+    needs: [build, installer, vst3, clap]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

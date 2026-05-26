@@ -1,0 +1,130 @@
+name: Build CLAP
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/core/**'
+      - 'src/shared-cpp/**'
+      - 'src/clap/**'
+      - 'test/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/build-clap.yaml'
+      - 'installer/installer-clap.iss'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/core/**'
+      - 'src/shared-cpp/**'
+      - 'src/clap/**'
+      - 'test/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/build-clap.yaml'
+      - 'installer/installer-clap.iss'
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      version:
+        description: Plug-in version detected from buildspec.json
+        value: ${{ jobs.windows-clap.outputs.version }}
+
+jobs:
+  windows-clap:
+    name: CLAP Windows x64
+    runs-on: windows-2022
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read plug-in version
+        id: meta
+        run: |
+          $bs = Get-Content -Path buildspec.json -Raw | ConvertFrom-Json
+          "version=$($bs.version)" >> $env:GITHUB_OUTPUT
+
+      - name: Configure
+        run: |
+          cmake -S . -B build_clap `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DBUILD_OBS=OFF `
+            -DBUILD_VST3=OFF `
+            -DBUILD_CLAP=ON
+
+      - name: Build Zondel.clap
+        run: |
+          cmake --build build_clap --config Release --target zondel-clap `
+            --parallel -- /noLogo
+
+      - name: Install clap-validator
+        id: install-validator
+        run: |
+          # clap-validator is a Rust binary released at
+          # github.com/free-audio/clap-validator. Latest stable as of
+          # the plan reference date.
+          $version = "0.3.2"
+          $url = "https://github.com/free-audio/clap-validator/releases/download/$version/clap-validator-$version-windows.zip"
+          $zip = "$env:TEMP\clap-validator.zip"
+          $dest = "$env:TEMP\clap-validator"
+          try {
+            Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+            Expand-Archive -Path $zip -DestinationPath $dest -Force
+            $exe = Get-ChildItem -Path $dest -Recurse -Filter "clap-validator.exe" | Select-Object -First 1
+            if (-not $exe) { throw "clap-validator.exe not found after extraction" }
+            "validator=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+            Write-Host "Installed clap-validator at $($exe.FullName)"
+          } catch {
+            Write-Warning "Could not install clap-validator: $_"
+            "validator=" >> $env:GITHUB_OUTPUT
+          }
+        continue-on-error: true
+
+      - name: Run clap-validator
+        if: steps.install-validator.outputs.validator != ''
+        run: |
+          $bundle = "build_clap\src\clap\Release\Zondel.clap"
+          if (-not (Test-Path $bundle)) { throw "Bundle not produced: $bundle" }
+          & "${{ steps.install-validator.outputs.validator }}" validate $bundle
+          if ($LASTEXITCODE -ne 0) { throw "clap-validator returned $LASTEXITCODE" }
+
+      - name: Package CLAP bundle
+        run: |
+          $ver = "${{ steps.meta.outputs.version }}"
+          $stage = "release"
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item -Path "build_clap\src\clap\Release\Zondel.clap" -Destination $stage
+          $zipName = "Zondel-clap-v$ver-windows-x64.zip"
+          Compress-Archive -Path "$stage\Zondel.clap" -DestinationPath "$stage\$zipName" -Force
+          Get-FileHash -Path "$stage\$zipName" -Algorithm SHA256 | `
+            ForEach-Object { "$($_.Hash.ToLower())  $zipName" } | `
+            Set-Content -Path "$stage\$zipName.sha256"
+
+      - name: Build Inno Setup installer
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Warning "Inno Setup not found on runner; skipping installer build."
+            exit 0
+          }
+          $ver = "${{ steps.meta.outputs.version }}"
+          & $iscc /DAppVersion="$ver" installer\installer-clap.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit $LASTEXITCODE" }
+          $exe = Get-ChildItem -Path "installer\Output\Zondel-clap-v$ver-setup.exe"
+          Copy-Item $exe.FullName -Destination release\
+        continue-on-error: true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zondel-clap-${{ steps.meta.outputs.version }}-windows-x64
+          path: |
+            release/Zondel-clap-*-windows-x64.zip
+            release/Zondel-clap-*-windows-x64.zip.sha256
+            release/Zondel-clap-*-setup.exe
+          if-no-files-found: warn

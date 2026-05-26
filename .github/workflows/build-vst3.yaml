@@ -22,11 +22,18 @@ on:
       - '.github/workflows/build-vst3.yaml'
       - 'installer/installer-vst3.iss'
   workflow_dispatch:
+  workflow_call:
+    outputs:
+      version:
+        description: Plug-in version detected from buildspec.json
+        value: ${{ jobs.windows-vst3.outputs.version }}
 
 jobs:
   windows-vst3:
     name: VST3 Windows x64
     runs-on: windows-2022
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
     defaults:
       run:
         shell: pwsh
