@@ -194,7 +194,11 @@ tresult PLUGIN_API ZondelProcessor::process(ProcessData& data) {
     }
 
     _engine->process(inBus.channelBuffers32, outBus.channelBuffers32, frames, _bypass);
-    outBus.silenceFlags = inBus.silenceFlags;
+    // The engine can emit non-silent delayed audio even when the host
+    // flagged the input as silent (queued from prior blocks, or noise-
+    // suppression residual). Clear the output silence flags; hosts that
+    // skip silent blocks would otherwise discard our tail.
+    outBus.silenceFlags = 0;
 
     // Push a status update if the engine's state has changed since the
     // last block we sent. Single int32 + uint64, fits in 16 bytes.

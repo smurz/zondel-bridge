@@ -6,6 +6,13 @@
   #define AppVersion "0.1.0"
 #endif
 
+; Build directory parameterised so local dev (build_x64) and CI
+; (build_vst3) both work without script edits. CI passes
+; /DBuildDir=build_vst3.
+#ifndef BuildDir
+  #define BuildDir "build_x64"
+#endif
+
 [Setup]
 ; Distinct AppId from the OBS installer so they uninstall independently.
 AppId={{2E18C5D4-9A3A-4B17-8E0E-9B0C53F6A4D2}}
@@ -39,7 +46,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ;         Zondel.vst3        (the DLL)
 ;       moduleinfo.json
 ;       Resources\           (icons, presets — may be empty)
-Source: "..\build_x64\VST3\Release\Zondel.vst3\*"; \
+Source: "..\{#BuildDir}\VST3\Release\Zondel.vst3\*"; \
     DestDir: "{app}\Zondel.vst3"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 

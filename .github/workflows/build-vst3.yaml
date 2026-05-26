@@ -112,7 +112,7 @@ jobs:
             exit 0
           }
           $ver = "${{ steps.meta.outputs.version }}"
-          & $iscc /DAppVersion="$ver" installer\installer-vst3.iss
+          & $iscc /DAppVersion="$ver" /DBuildDir="build_vst3" installer\installer-vst3.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit $LASTEXITCODE" }
           $exe = Get-ChildItem -Path "installer\Output\Zondel-vst3-v$ver-setup.exe"
           Copy-Item $exe.FullName -Destination release\

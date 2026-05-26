@@ -55,12 +55,25 @@ jobs:
             -G "Visual Studio 17 2022" -A x64 `
             -DBUILD_OBS=OFF `
             -DBUILD_VST3=OFF `
-            -DBUILD_CLAP=ON
+            -DBUILD_CLAP=ON `
+            -DBUILD_PLUGIN_TESTS=ON
 
-      - name: Build Zondel.clap
+      - name: Build Zondel.clap + engine tests + fake-pipe-server
         run: |
           cmake --build build_clap --config Release --target zondel-clap `
             --parallel -- /noLogo
+          cmake --build build_clap --config Release `
+            --target test-zondel-engine test-realtime-budget fake-pipe-server `
+            --parallel -- /noLogo
+
+      - name: Run engine + realtime-budget tests
+        run: |
+          Push-Location build_clap\Release
+          .\test-zondel-engine.exe
+          if ($LASTEXITCODE -ne 0) { throw "test-zondel-engine failed" }
+          .\test-realtime-budget.exe
+          if ($LASTEXITCODE -ne 0) { throw "test-realtime-budget failed" }
+          Pop-Location
 
       - name: Install clap-validator
         id: install-validator
@@ -113,7 +126,7 @@ jobs:
             exit 0
           }
           $ver = "${{ steps.meta.outputs.version }}"
-          & $iscc /DAppVersion="$ver" installer\installer-clap.iss
+          & $iscc /DAppVersion="$ver" /DBuildDir="build_clap" installer\installer-clap.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit $LASTEXITCODE" }
           $exe = Get-ChildItem -Path "installer\Output\Zondel-clap-v$ver-setup.exe"
           Copy-Item $exe.FullName -Destination release\

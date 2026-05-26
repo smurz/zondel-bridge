@@ -109,6 +109,13 @@ private:
 
     std::atomic<uint32_t> _timeoutMicros { 5000 };
     std::atomic<uint64_t> _updateCounter { 0 };
+    // Atomic mirror of _state.status — written from the audio thread,
+    // read from any thread. The plain int inside _state is not safe to
+    // read non-atomically per the C++ memory model.
+    std::atomic<int>      _statusMirror  { 0 };
+    // False when ctor allocation failed. process() short-circuits to
+    // pass-through when not viable.
+    bool                  _viable = true;
 
     static constexpr int    kZondelChunk = 480;     // samples
     static constexpr double kZondelRate  = 48000.0;

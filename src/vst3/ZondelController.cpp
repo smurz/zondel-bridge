@@ -28,18 +28,26 @@ tresult PLUGIN_API ZondelController::initialize(FUnknown* context) {
         ParameterInfo::kCanAutomate | ParameterInfo::kIsBypass,
         kParamBypass);
 
-    // Pipe timeout — integer microseconds in [1000, 20000].
-    parameters.addParameter(
+    // Pipe timeout — integer microseconds in [1000, 20000]. Use
+    // RangeParameter so hosts display plain microseconds (not a 0..1
+    // normalised value) in their generic parameter panel.
+    // Unicode µ (U+00B5) via \u escape — safer than UTF-8 byte escapes
+    // (which STR16 would split into separate UTF-16 code units) or bare
+    // literals (which require /utf-8 on MSVC).
+    auto* timeoutParam = new RangeParameter(
         STR16("Pipe timeout"),
-        STR16("\xC2\xB5s"),   // "µs" UTF-8
+        kParamPipeTimeout,
+        STR16("\u00B5s"),
+        static_cast<double>(kPipeTimeoutMinUs),
+        static_cast<double>(kPipeTimeoutMaxUs),
+        5000.0,
         kPipeTimeoutMaxUs - kPipeTimeoutMinUs,
-        (5000.0 - kPipeTimeoutMinUs) /
-            static_cast<double>(kPipeTimeoutMaxUs - kPipeTimeoutMinUs),
-        ParameterInfo::kCanAutomate,
-        kParamPipeTimeout);
+        ParameterInfo::kCanAutomate);
+    parameters.addParameter(timeoutParam);
 
     // Status — read-only enum surfaced via Data Exchange from the
     // processor. The host displays this as a non-automatable label.
+    // Unicode bullet U+25CF (●) via \u escape — same encoding reason.
     auto* statusParam = new StringListParameter(
         STR16("Status"),
         kParamStatus,
@@ -47,8 +55,8 @@ tresult PLUGIN_API ZondelController::initialize(FUnknown* context) {
         ParameterInfo::kIsReadOnly);
     statusParam->appendString(STR16("Unknown"));
     statusParam->appendString(STR16("Connecting"));
-    statusParam->appendString(STR16("\xE2\x97\x8F Connected"));      // ● Connected
-    statusParam->appendString(STR16("\xE2\x97\x8F Disconnected"));   // ● Disconnected
+    statusParam->appendString(STR16("\u25CF Connected"));
+    statusParam->appendString(STR16("\u25CF Disconnected"));
     statusParam->appendString(STR16("Backed off"));
     statusParam->appendString(STR16("Unsupported format"));
     parameters.addParameter(statusParam);

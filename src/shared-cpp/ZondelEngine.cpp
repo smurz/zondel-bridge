@@ -70,6 +70,20 @@ Engine::Engine(double sampleRate, int channels, int maxBlockSize,
     _scratchRecv  = static_cast<float*>(std::calloc(kZondelChunk, sizeof(float)));
     _monoOut      = static_cast<float*>(std::calloc(scratchCap, sizeof(float)));
     _monoBack     = static_cast<float*>(std::calloc(scratchCap, sizeof(float)));
+    if (!_monoIn || !_srate48k || !_scratchSend || !_scratchRecv ||
+        !_monoOut || !_monoBack) {
+        // OOM — process() will short-circuit to pass-through.
+        _viable = false;
+    }
+
+    // Pre-fill the recv ring with one chunk of zeros so the steady-state
+    // output is delayed by exactly one chunk (matching getLatencySamples
+    // and host PDC). Without this, when the host block size doesn't line
+    // up with kZondelChunk (e.g. 256/512/1024 at 48 kHz), recv would
+    // sometimes underflow and we'd zero-pad mid-stream — audible clicks.
+    if (_viable) {
+        ring_buffer_push(&_recvRing, _scratchSend, kZondelChunk); // _scratchSend is zeroed by calloc
+    }
 }
 
 Engine::~Engine() {
@@ -85,13 +99,19 @@ Engine::~Engine() {
 }
 
 void Engine::rebuildStatusSnapshot() noexcept {
+    // Audio-thread writer: mirror the latest plain-int status into the
+    // atomic before bumping the counter so cross-thread readers see a
+    // consistent (status, counter) pair via acquire on the counter.
+    _statusMirror.store(_state.status, std::memory_order_relaxed);
     _updateCounter.fetch_add(1, std::memory_order_release);
 }
 
 Engine::StatusSnapshot Engine::status() const noexcept {
     StatusSnapshot s;
-    s.status = _state.status;
+    // Acquire the counter first, then the status — pairs with the
+    // release in rebuildStatusSnapshot().
     s.updateCounter = _updateCounter.load(std::memory_order_acquire);
+    s.status        = _statusMirror.load(std::memory_order_relaxed);
     return s;
 }
 
@@ -126,6 +146,13 @@ bool Engine::process(const float* const* inputs,
             }
         }
     };
+
+    // Engine in not-viable state (alloc failure in ctor) or pipe-client
+    // creation failed — pass through quietly.
+    if (!_viable || !_pipe) {
+        passThrough();
+        return false;
+    }
 
     if (bypass) {
         passThrough();
@@ -179,7 +206,13 @@ bool Engine::process(const float* const* inputs,
     ring_buffer_push(&_sendRing, src48k, src48kFrames);
 
     // 3b. Drain in 480-sample chunks.
+    // The drain cap must keep up with the host block — at large block
+    // sizes (e.g. 2048 samples at 48 kHz) we need 4+ chunks per call to
+    // avoid ring overflow / send-ring growth. Compute a dynamic ceiling
+    // with +2 headroom for SRC overshoot.
     const uint32_t timeout = _timeoutMicros.load(std::memory_order_relaxed);
+    const int maxChunks = std::max(4,
+        static_cast<int>(src48kFrames / kZondelChunk) + 2);
     int chunksProcessed = 0;
     while (ring_buffer_fill(&_sendRing) >= static_cast<size_t>(kZondelChunk)) {
         ring_buffer_pop(&_sendRing, _scratchSend, kZondelChunk);
@@ -204,9 +237,7 @@ bool Engine::process(const float* const* inputs,
             rebuildStatusSnapshot();
         ++chunksProcessed;
 
-        // Defensive: bound how many chunks we drain in one block to
-        // avoid worst-case starvation on large frame inputs.
-        if (chunksProcessed >= 4)
+        if (chunksProcessed >= maxChunks)
             break;
     }
 

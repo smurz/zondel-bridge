@@ -6,6 +6,13 @@
   #define AppVersion "0.1.0"
 #endif
 
+; Build directory parameterised so local dev (build_x64) and CI
+; (build_clap) both work without script edits. CI passes
+; /DBuildDir=build_clap.
+#ifndef BuildDir
+  #define BuildDir "build_x64"
+#endif
+
 [Setup]
 ; Distinct AppId from the OBS and VST3 installers.
 AppId={{93B58F26-1FC0-4D71-B23E-7F2F8E3D4B58}}
@@ -32,7 +39,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 [Files]
 ; CLAP plug-ins ship as a single .clap file (a renamed DLL on Windows).
-Source: "..\build_x64\src\clap\Release\Zondel.clap"; DestDir: "{app}"; \
+Source: "..\{#BuildDir}\src\clap\Release\Zondel.clap"; DestDir: "{app}"; \
     Flags: ignoreversion
 
 [UninstallDelete]

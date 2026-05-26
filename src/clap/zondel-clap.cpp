@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -41,7 +42,10 @@ constexpr const char* kPluginDesc    = "Routes DAW audio through the Zondel desk
 
 const char* const kFeatures[] = {
     CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,
-    "noise-suppressor",
+    // Canonical category per clap/plugin-features.h. We're a noise
+    // suppressor / restoration tool, not a synth or instrument.
+    CLAP_PLUGIN_FEATURE_RESTORATION,
+    CLAP_PLUGIN_FEATURE_UTILITY,
     nullptr,
 };
 
@@ -290,14 +294,40 @@ bool CLAP_ABI params_value_to_text(const clap_plugin_t*, clap_id id, double valu
     }
 }
 
+// Case-insensitive equality, ignoring leading / trailing ASCII whitespace.
+// Returns true if `text` (after trim) compares equal to `expect`.
+static bool ieq_trim(const char* text, const char* expect) {
+    while (*text == ' ' || *text == '\t') ++text;
+    const char* end = text + std::strlen(text);
+    while (end > text && (end[-1] == ' ' || end[-1] == '\t')) --end;
+    const size_t n = static_cast<size_t>(end - text);
+    if (n != std::strlen(expect)) return false;
+    for (size_t i = 0; i < n; ++i) {
+        if (std::tolower(static_cast<unsigned char>(text[i])) !=
+            std::tolower(static_cast<unsigned char>(expect[i])))
+            return false;
+    }
+    return true;
+}
+
 bool CLAP_ABI params_text_to_value(const clap_plugin_t*, clap_id id,
                                    const char* text, double* out_value) {
     if (!text || !out_value) return false;
     switch (id) {
         case kParamBypass:
-            *out_value = (std::strstr(text, "On") || std::strstr(text, "on") ||
-                          std::strcmp(text, "1") == 0) ? 1.0 : 0.0;
-            return true;
+            // Match strictly the canonical strings produced by
+            // value_to_text ("On" / "Off") plus a couple of obvious
+            // synonyms. The previous strstr-based check matched any
+            // word containing "On" (e.g. "Bone", "Stone").
+            if (ieq_trim(text, "On")   || ieq_trim(text, "1") ||
+                ieq_trim(text, "true") || ieq_trim(text, "yes")) {
+                *out_value = 1.0; return true;
+            }
+            if (ieq_trim(text, "Off")  || ieq_trim(text, "0") ||
+                ieq_trim(text, "false") || ieq_trim(text, "no")) {
+                *out_value = 0.0; return true;
+            }
+            return false;
         case kParamPipeTimeout: {
             int us = std::atoi(text);
             if (us <= 0) return false;
