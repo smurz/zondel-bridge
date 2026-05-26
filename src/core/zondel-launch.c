@@ -1,4 +1,4 @@
-/* License: GPL-3.0-or-later. Copyright (c) 2026 Zondel. */
+/* License: GPL-2.0-or-later. Copyright (c) 2026 Zondel. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <shellapi.h>

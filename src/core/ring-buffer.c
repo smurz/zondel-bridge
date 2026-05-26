@@ -1,4 +1,4 @@
-/* License: GPL-3.0-or-later. Copyright (c) 2026 Zondel. */
+/* License: GPL-2.0-or-later. Copyright (c) 2026 Zondel. */
 #include "ring-buffer.h"
 #include <stdlib.h>
 #include <string.h>

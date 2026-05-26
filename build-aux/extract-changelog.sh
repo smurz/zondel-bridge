@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Extracts a single version's section from CHANGELOG.md
 # Usage: extract-changelog.sh v0.1.0   (or  0.1.0  — either works)
-# License: GPL-3.0-or-later. Copyright (c) 2026 Zondel.
+# License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
 
 set -euo pipefail
 

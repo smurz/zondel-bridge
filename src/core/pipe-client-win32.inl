@@ -1,4 +1,4 @@
-/* License: GPL-3.0-or-later. Copyright (c) 2026 Zondel.
+/* License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
  * Win32 named-pipe client. Filled in across tasks 6-8.
  */
 #define WIN32_LEAN_AND_MEAN

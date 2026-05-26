@@ -4,7 +4,7 @@
  * Single-threaded, synchronous, suitable for direct use inside OBS's
  * filter_audio callback. See ../docs/PROTOCOL.md for the wire format.
  *
- * License: GPL-3.0-or-later. Copyright (c) 2026 Zondel.
+ * License: GPL-2.0-or-later. Copyright (c) 2026 Zondel.
  */
 #ifndef ZONDEL_PIPE_CLIENT_H
 #define ZONDEL_PIPE_CLIENT_H

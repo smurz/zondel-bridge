@@ -40,7 +40,7 @@ planned for v2.
 - OBS Studio 31.1 or newer
 - [Zondel](https://zondel.net/download) — paid desktop app
 
-The plugin itself is free and GPLv3+. Zondel is a separate commercial product.
+The plugin itself is free and GPLv2+. Zondel is a separate commercial product.
 This plugin does nothing useful without it; if you just want a free OBS noise
 filter, OBS already includes RNNoise out of the box.
 
@@ -144,8 +144,7 @@ are fetched automatically via `buildspec.json`.
 
 ## License
 
-GPLv3+. (OBS Studio itself is GPLv2+, which is forward-compatible — recipients
-may use this plugin under GPLv3 alongside an OBS install.) See [LICENSE](LICENSE).
+GPLv2+, same as OBS Studio. See [LICENSE](LICENSE).
 
 ## Issues and support
 
