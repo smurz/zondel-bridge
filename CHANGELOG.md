@@ -6,6 +6,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0-beta.3] - 2026-05-26
+
+First release to ship the **VST3** and **CLAP** plugins alongside the OBS
+Studio plugin. All three are thin clients over the same `zondel-core`
+named-pipe protocol; the repo was renamed `zondel-obs-plugin` →
+`zondel-bridge` and relicensed GPLv2+ → MIT to reflect the broader scope.
+
+### Added
+- **VST3 plugin** (`Zondel.vst3`, x64). AudioEffect + EditController on the
+  shared `zondel::Engine`. Bus-arrangement negotiation (mono+mono /
+  stereo+stereo only; surround declined host-correctly), state persistence
+  via `getState`/`setState`, PDC via `getLatencySamples`, Bypass flagged
+  `kIsBypass`, Pipe-timeout `RangeParameter`, live Status surfaced through
+  the VST3 Data Exchange API (SDK >= 3.7.9). Passes the Steinberg validator
+  with zero failures. Pinned to VST3 SDK `v3.8.0_build_66` (MIT).
+- **CLAP plugin** (`Zondel.clap`, x64). Native C++ wrapper on the same
+  engine. Extensions: audio-ports, params (Bypass `CLAP_PARAM_IS_BYPASS`,
+  Pipe timeout), state (little-endian blob, cross-format-compatible with
+  VST3), latency, render (hard-realtime). Passes clap-validator.
+- **Shared C++ engine** (`src/shared-cpp/ZondelEngine`) — single
+  realtime-safe audio path linked by both VST3 and CLAP. Allocation-free
+  `process()`, one-chunk PDC pre-fill, bounded chunk drain, lock-free
+  status snapshot.
+- CI workflows `build-vst3.yaml` + `build-clap.yaml` (build -> validator ->
+  engine/realtime tests -> zip + Inno Setup installer). `release.yaml`
+  fans out to all three plugins and publishes six artefacts per tag.
+- Installers `installer-vst3.iss` (-> `%CommonProgramFiles%\VST3\`) and
+  `installer-clap.iss` (-> `%CommonProgramFiles%\CLAP\`).
+- `docs/PLAN-VST3-CLAP.md`, `docs/DAW-MATRIX.md`, `docs/RELEASE-CHECKLIST.md`.
+- `test/test-zondel-engine.cpp` and `test/test-realtime-budget.cpp`.
+
+### Changed
+- Repo restructured into `src/core/` (shared C), `src/obs/`, `src/shared-cpp/`,
+  `src/vst3/`, `src/clap/`. OBS plugin binary identity (`zondel-obs-plugin.dll`)
+  and behaviour unchanged.
+- Relicensed GPLv2+ -> MIT repo-wide (VST3 SDK is MIT since 2025; libobs's
+  GPL is satisfied by MIT compatibility).
+
+### Fixed
+- pipe-client (Win32): reuse a single OVERLAPPED event instead of allocating
+  kernel handles per round-trip; cancel + drain pending I/O on timeout
+  (prevents the kernel writing to freed stack buffers); apply one deadline
+  across the whole round-trip instead of per-op; honour the response status
+  byte.
+- Engine: bail out of the chunk-drain loop after the first pipe failure per
+  block (was risking tens of ms of audio-thread stall); recv-ring pre-fill +
+  capacity scaled to block size (no mid-stream zero-pad clicks, no overflow
+  at large blocks); clear rings on bypass/back-off transitions (no stale
+  audio on resume); atomic status snapshot; `_viable` guards on alloc
+  failure.
+- VST3: atomic Bypass / Pipe-timeout (no race with state save during
+  playback); `\u` Unicode escapes for parameter labels (no mojibake);
+  silence-flag handling preserves host optimisation only in bypass.
+- CI/installers: build-dir + build-config parameterised so local
+  (`build_x64`/RelWithDebInfo) and CI (`build_vst3`/Release) both resolve;
+  installer build failures now fail CI instead of shipping empty releases;
+  release signing-step condition fixed.
+
 ## [0.1.0-beta.2] - 2026-05-13
 
 Patch beta. The `v0.1.0-beta.1` tag was published but its release-packaging
